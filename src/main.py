@@ -1,4 +1,4 @@
-"""
+﻿"""
 Lab 11 — Main Entry Point
 Run the full lab flow: attack -> defend -> test -> HITL design
 
@@ -17,7 +17,7 @@ from core.config import setup_api_key
 
 
 async def part1_attacks():
-    """Hạng mục B: attack unsafe agent, then try guards agent (điểm cộng)."""
+    """Run handcrafted and AI-generated red-team prompts on both real targets."""
     print("\n" + "=" * 60)
     print("PART 1 / Hạng mục B: Attack Unsafe + Guards agents")
     print("=" * 60)
@@ -26,41 +26,33 @@ async def part1_attacks():
     from agents.guards_agent import create_guards_agent
     from attacks.attacks import run_attacks, generate_ai_attacks, save_attack_results
 
-    # --- Unsafe (required for hạng mục B) ---
     unsafe_agent, unsafe_runner = create_unsafe_agent()
     await test_agent(unsafe_agent, unsafe_runner)
+    unsafe_results = await run_attacks(unsafe_agent, unsafe_runner, target_name="unsafe")
 
-    print("\n--- Attacks on UNSAFE agent (hạng mục B) ---")
-    unsafe_results = await run_attacks(
-        unsafe_agent, unsafe_runner, target_name="unsafe"
-    )
-
-    # --- Guards (điểm cộng only if leaked=true here) ---
-    print("\n--- Attacks on GUARDS agent (điểm cộng nếu LEAKED) ---")
     guards_agent, guards_runner = create_guards_agent()
-    guards_results = await run_attacks(
-        guards_agent, guards_runner, target_name="guards"
-    )
+    guards_results = await run_attacks(guards_agent, guards_runner, target_name="guards")
 
-    print("\n--- Generating AI attacks (TODO 14) ---")
+    print("\n--- Generating and replaying AI attacks (TODO 14) ---")
     ai_attacks = await generate_ai_attacks()
+    ai_prompts = [
+        {"id": 100 + i, "category": item.get("type", "ai_generated"),
+         "input": item.get("prompt", item.get("input", ""))}
+        for i, item in enumerate(ai_attacks, 1)
+        if isinstance(item, dict) and (item.get("prompt") or item.get("input"))
+    ]
+    if ai_prompts:
+        unsafe_results.extend(await run_attacks(
+            unsafe_agent, unsafe_runner, prompts=ai_prompts, target_name="unsafe", save_json=False
+        ))
+        guards_results.extend(await run_attacks(
+            guards_agent, guards_runner, prompts=ai_prompts, target_name="guards", save_json=False
+        ))
 
-    save_attack_results(
-        unsafe_results=unsafe_results,
-        guards_results=guards_results,
-        ai_attacks=ai_attacks,
-    )
-
-    bonus_leaks = sum(1 for r in guards_results if r.get("leaked"))
-    print("\n" + "=" * 60)
-    print(f"Guards leaks (điểm cộng): {bonus_leaks}  → verifier replay decides tiered bonus (max +10)")
-    print("=" * 60)
-
-    return {
-        "unsafe": unsafe_results,
-        "guards": guards_results,
-        "ai_attacks": ai_attacks,
-    }
+    save_attack_results(unsafe_results=unsafe_results, guards_results=guards_results, ai_attacks=ai_attacks)
+    bonus_leaks = sum(1 for row in guards_results if row.get("leaked"))
+    print(f"Guards leaks (verifier decides bonus): {bonus_leaks}")
+    return {"unsafe": unsafe_results, "guards": guards_results, "ai_attacks": ai_attacks}
 
 
 async def part2_guardrails():
@@ -228,3 +220,4 @@ if __name__ == "__main__":
         asyncio.run(main(parts=[args.part]))
     else:
         asyncio.run(main())
+
